@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mask Review Tool</title>
+<link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+
+<!-- Header -->
+<header id="header">
+  <h1>Mask Review Tool</h1>
+  <div class="header-controls">
+    <input type="text" id="folderPath" placeholder="Select a folder..." readonly>
+    <button id="btnBrowse" onclick="openBrowseDialog()">Browse</button>
+    <button id="btnLoad" onclick="loadDataset()" disabled>Load</button>
+    <span id="loadStatus"></span>
+  </div>
+  <div class="header-controls sample-controls">
+    <label>Samples:</label>
+    <input type="text" id="sampleDirPath" placeholder="Sample image folder (optional)">
+    <button id="btnBrowseSample" onclick="openBrowseDialog('sample')">Browse</button>
+    <button id="btnApplySample" onclick="applySampleDir()">Apply</button>
+  </div>
+</header>
+
+<!-- Main Layout -->
+<div id="mainLayout" class="hidden">
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div id="sidebarScroll">
+      <div class="sidebar-section">
+        <h3>Categories</h3>
+        <ul id="categoryTree"></ul>
+      </div>
+    </div>
+    <div id="sidebarBottom">
+      <div class="sidebar-section">
+        <h3>Filter</h3>
+        <input type="text" id="searchInput" placeholder="Search barcode / filename...">
+        <select id="statusFilter">
+          <option value="all">All</option>
+          <option value="has_error">Has Error</option>
+          <option value="no_error">No Error</option>
+        </select>
+      </div>
+      <div class="sidebar-section">
+        <h3>Actions</h3>
+        <button id="btnExport" class="btn-export" onclick="exportXlsx()" disabled>Export XLSX</button>
+        <div class="progress-info">
+          <span id="errorCount">0</span> / <span id="totalCount">0</span> errors checked
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Content -->
+  <main id="content">
+    <div id="contentHeader"></div>
+    <div id="contentColumns">
+      <div id="contentLeft">
+        <div id="groupContainer"></div>
+      </div>
+      <div id="contentRight" class="hidden">
+        <div id="sampleHeader"></div>
+        <div id="sampleGrid"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Browse Dialog -->
+<div id="browseOverlay" class="overlay hidden">
+  <div class="dialog">
+    <div class="dialog-header">
+      <h2>Select Folder</h2>
+      <button onclick="closeBrowseDialog()">&times;</button>
+    </div>
+    <div class="dialog-body">
+      <div class="browse-path" id="browsePath">/</div>
+      <button class="browse-up" id="btnBrowseUp" onclick="browseUp()">&#8593; Parent</button>
+      <ul id="browseList" class="browse-list"></ul>
+    </div>
+    <div class="dialog-footer">
+      <span id="browseAnnotationStatus"></span>
+      <button id="btnBrowseSelect" onclick="selectBrowseFolder()" disabled>Select</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js?v=2"></script>
+</body>
+</html>

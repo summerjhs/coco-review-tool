@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mask Review Tool</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100vh; overflow: hidden; margin: 0; }
+body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; display: flex; flex-direction: column; }
+
+/* Header */
+#header {
+  min-height: 50px; background: #2c3e50; color: #fff; padding: 8px 20px;
+  display: flex; align-items: center; gap: 20px; flex-shrink: 0; flex-wrap: wrap;
+}
+#header h1 { font-size: 18px; white-space: nowrap; }
+.header-controls { display: flex; align-items: center; gap: 8px; }
+.header-controls label { font-size: 12px; color: #ecf0f1; white-space: nowrap; }
+.header-controls button {
+  padding: 6px 14px; border: none; border-radius: 4px;
+  cursor: pointer; font-size: 13px; font-weight: 600;
+}
+.header-controls input[type="file"] { display: none; }
+.btn-dataset { background: #3498db; color: #fff; }
+.btn-dataset:hover { background: #2980b9; }
+.btn-sample { background: #8e44ad; color: #fff; }
+.btn-sample:hover { background: #7d3c98; }
+.btn-save { background: #e67e22; color: #fff; }
+.btn-save:hover { background: #d35400; }
+#loadStatus { font-size: 12px; color: #ecf0f1; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Main Layout */
+#mainLayout { display: flex; flex: 1; min-height: 0; }
+#mainLayout.hidden { display: none !important; }
+
+/* Sidebar */
+#sidebar {
+  width: 260px; height: 100%; background: #fff; border-right: 1px solid #ddd;
+  flex-shrink: 0; display: flex; flex-direction: column;
+}
+#sidebarScroll { flex: 1; overflow-y: auto; min-height: 0; padding: 12px 12px 0; }
+#sidebarBottom { flex-shrink: 0; border-top: 1px solid #ddd; padding: 12px; background: #fff; }
+.sidebar-section { margin-bottom: 16px; }
+.sidebar-section h3 { font-size: 13px; color: #666; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+#categoryTree { list-style: none; }
+#categoryTree li {
+  padding: 6px 10px; border-radius: 4px; cursor: pointer;
+  font-size: 13px; display: flex; justify-content: space-between; align-items: center;
+}
+#categoryTree li:hover { background: #ecf0f1; }
+#categoryTree li.active { background: #3498db; color: #fff; }
+#categoryTree li .badge {
+  background: #e0e0e0; padding: 1px 8px; border-radius: 10px; font-size: 11px; color: #555;
+}
+#categoryTree li.active .badge { background: rgba(255,255,255,0.3); color: #fff; }
+#categoryTree li.sub { padding-left: 24px; font-size: 12px; color: #555; }
+#categoryTree li.sub.active { color: #fff; }
+#categoryTree li.visited { color: #aaa; }
+#categoryTree li.visited::before { content: "\2713 "; font-size: 11px; color: #27ae60; }
+#categoryTree li.visited.active { color: #fff; }
+#categoryTree li.visited.active::before { color: #fff; }
+#searchInput {
+  width: 100%; padding: 6px 10px; border: 1px solid #ddd;
+  border-radius: 4px; font-size: 13px; margin-bottom: 8px;
+}
+#statusFilter {
+  width: 100%; padding: 6px 10px; border: 1px solid #ddd;
+  border-radius: 4px; font-size: 13px;
+}
+.btn-export {
+  width: 100%; padding: 8px; background: #e67e22; color: #fff;
+  border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 10px;
+}
+.btn-export:hover:not(:disabled) { background: #d35400; }
+.btn-export:disabled { background: #bdc3c7; cursor: not-allowed; }
+.progress-info { font-size: 12px; color: #666; }
+.progress-bar { height: 4px; background: #e0e0e0; border-radius: 2px; margin-top: 4px; }
+.progress-fill { height: 100%; background: #e74c3c; border-radius: 2px; width: 0; transition: width 0.3s; }
+
+/* Content */
+#content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#contentHeader { padding: 12px 16px 0; font-size: 15px; font-weight: 600; color: #2c3e50; flex-shrink: 0; }
+#contentColumns { display: flex; flex: 1; min-height: 0; }
+#contentLeft { flex: 1; overflow-y: auto; padding: 12px 16px; min-width: 0; }
+#contentRight {
+  flex: 1; overflow-y: auto;
+  border-left: 1px solid #ddd; padding: 12px; background: #fafafa; min-width: 0;
+}
+#contentRight.hidden { display: none !important; }
+#sampleHeader {
+  font-size: 14px; font-weight: 600; color: #2c3e50;
+  margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #e0e0e0;
+}
+#sampleGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.sample-card { border: 1px solid #e0e0e0; border-radius: 4px; overflow: hidden; background: #fff; }
+.sample-card img { width: 100%; height: 120px; object-fit: contain; background: #111; display: block; }
+.sample-card .sample-name { padding: 4px 6px; font-size: 10px; color: #888; text-align: center; }
+.sample-empty { color: #999; font-size: 13px; padding: 20px; text-align: center; }
+
+/* Group */
+.group-section { margin-bottom: 20px; }
+.group-header {
+  background: #34495e; color: #fff; padding: 10px 16px;
+  border-radius: 6px 6px 0 0; display: flex; justify-content: space-between;
+  align-items: center; cursor: pointer;
+}
+.group-header h3 { font-size: 14px; font-weight: 600; }
+.group-header .group-badge { font-size: 12px; opacity: 0.8; }
+.group-header .group-meta { font-size: 11px; opacity: 0.7; }
+.group-body {
+  background: #fff; border: 1px solid #ddd; border-top: none;
+  border-radius: 0 0 6px 6px; padding: 12px;
+}
+.group-body.collapsed { display: none; }
+.items-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+
+/* Item Card */
+.item-card {
+  border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;
+  background: #fafafa; transition: border-color 0.2s;
+}
+.item-card.error { border: 2px solid #e74c3c; background: #fdf0f0; }
+.item-card img, .item-card canvas {
+  width: 100%; height: 150px; object-fit: contain; background: #111; display: block;
+}
+.item-meta { padding: 8px; font-size: 11px; color: #555; line-height: 1.6; }
+.item-meta .sid { font-weight: 600; color: #2c3e50; }
+.item-meta .src { color: #888; word-break: break-all; font-size: 10px; }
+.item-meta .category-edit { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.item-meta .category-edit label { font-size: 10px; color: #888; white-space: nowrap; }
+.item-meta .category-edit select {
+  flex: 1; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px;
+  font-size: 11px; min-width: 0; background: #fff; cursor: pointer;
+}
+.item-meta .barcode-edit { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.item-meta .barcode-edit label { font-size: 10px; color: #888; white-space: nowrap; }
+.item-meta .barcode-edit input {
+  flex: 1; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px; font-size: 11px; min-width: 0;
+}
+.item-meta .barcode-edit input.saved { border-color: #27ae60; background: #eafaf1; }
+.item-meta .chk { margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+.item-meta .chk input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; }
+.item-meta .chk label { cursor: pointer; color: #c0392b; font-weight: 600; }
+.load-more-btn {
+  display: block; margin: 12px auto; padding: 8px 24px;
+  background: #3498db; color: #fff; border: none; border-radius: 6px;
+  cursor: pointer; font-size: 13px;
+}
+.load-more-btn:hover { background: #2980b9; }
+
+/* Loading overlay */
+#loadingOverlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5); display: flex; align-items: center;
+  justify-content: center; z-index: 2000;
+}
+#loadingOverlay.hidden { display: none !important; }
+#loadingOverlay .loading-box {
+  background: #fff; border-radius: 10px; padding: 30px 40px; text-align: center;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+#loadingOverlay .loading-box h3 { margin-bottom: 10px; }
+#loadingProgress { font-size: 13px; color: #666; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header id="header">
+  <h1>Mask Review Tool</h1>
+  <div class="header-controls">
+    <label>Dataset:</label>
+    <input type="file" id="datasetInput" webkitdirectory>
+    <button class="btn-dataset" onclick="document.getElementById('datasetInput').click()">Open Folder</button>
+    <span id="loadStatus"></span>
+  </div>
+  <div class="header-controls">
+    <label>Samples:</label>
+    <input type="file" id="sampleInput" webkitdirectory>
+    <button class="btn-sample" onclick="document.getElementById('sampleInput').click()">Open Folder</button>
+    <span id="sampleStatus" style="font-size:12px;color:#ecf0f1;"></span>
+  </div>
+  <div class="header-controls">
+    <button class="btn-save" onclick="downloadModifiedJSON()" title="Save modified COCO JSON">Save JSON</button>
+  </div>
+</header>
+
+<!-- Main Layout -->
+<div id="mainLayout" class="hidden">
+  <aside id="sidebar">
+    <div id="sidebarScroll">
+      <div class="sidebar-section">
+        <h3>Categories</h3>
+        <ul id="categoryTree"></ul>
+      </div>
+    </div>
+    <div id="sidebarBottom">
+      <div class="sidebar-section">
+        <h3>Filter</h3>
+        <input type="text" id="searchInput" placeholder="Search barcode / filename...">
+        <select id="statusFilter">
+          <option value="all">All</option>
+          <option value="has_error">Has Error</option>
+          <option value="no_error">No Error</option>
+        </select>
+      </div>
+      <div class="sidebar-section">
+        <h3>Actions</h3>
+        <button id="btnExport" class="btn-export" onclick="exportXlsx()" disabled>Export XLSX</button>
+        <div class="progress-info">
+          <span id="errorCount">0</span> / <span id="totalCount">0</span> errors checked
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <main id="content">
+    <div id="contentHeader"></div>
+    <div id="contentColumns">
+      <div id="contentLeft"><div id="groupContainer"></div></div>
+      <div id="contentRight" class="hidden">
+        <div id="sampleHeader"></div>
+        <div id="sampleGrid"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="hidden">
+  <div class="loading-box">
+    <h3>Loading Dataset...</h3>
+    <div id="loadingProgress">Parsing JSON...</div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════
+// State
+// ══════════════════════════════════════════
+let cocoData = null;           // raw COCO JSON
+let images = {};               // id -> {file_name, width, height}
+let annotations = {};          // id -> annotation
+let categories = {};           // id -> name
+let catNameToId = {};
+let byCategory = {};           // catName -> [annId, ...]
+let byBarcode = {};            // barcodeKey -> [annId, ...]
+let imageFrameIndex = {};      // imageId -> 0-based frame
+let imageFileMap = {};         // fileName -> File object
+let sampleFileMap = {};        // barcode -> [File, ...]
+let cropCache = {};            // annId -> dataURL
+let imageCache = {};           // fileName -> HTMLImageElement
+let cropQueue = [];
+let cropRunning = 0;
+const MAX_CONCURRENT = 4;
+
+let structure = {};
+let allCategories = [];
+let activeCategory = null;
+let activeGroup = null;
+let errorSet = new Set();
+let totalAnnotations = 0;
+let visitedSet = new Set();
+let dirty = false;
+
+// ══════════════════════════════════════════
+// RLE Decoder (COCO compressed RLE → mask)
+// ══════════════════════════════════════════
+function decodeCompressedRLE(countsStr) {
+  // COCO compressed RLE: ASCII string → run-length array
+  const cnts = [];
+  let p = 0;
+  while (p < countsStr.length) {
+    let x = 0, k = 0, more = true;
+    while (more) {
+      const c = countsStr.charCodeAt(p) - 48;
+      p++;
+      x |= (c & 0x1f) << (5 * k);
+      more = (c & 0x20) !== 0;
+      k++;
+    }
+    if (x & 1) x = -(x >> 1); else x = x >> 1;
+    if (cnts.length > 2) x += cnts[cnts.length - 2];
+    cnts.push(x);
+  }
+  return cnts;
+}
+
+function decodeMask(seg, h, w) {
+  let counts;
+  if (typeof seg.counts === 'string') {
+    counts = decodeCompressedRLE(seg.counts);
+  } else {
+    counts = seg.counts;
+  }
+
+  const mask = new Uint8Array(h * w);
+  let idx = 0;
+  let val = 0;
+  for (let i = 0; i < counts.length; i++) {
+    const run = counts[i];
+    for (let j = 0; j < run; j++) {
+      if (idx < mask.length) mask[idx++] = val;
+    }
+    val = 1 - val;
+  }
+
+  // COCO RLE is column-major, transpose to row-major
+  const result = new Uint8Array(h * w);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      result[y * w + x] = mask[x * h + y];
+    }
+  }
+  return result;
+}
+
+// ══════════════════════════════════════════
+// Image Loading (cached)
+// ══════════════════════════════════════════
+const _imageLoadPromises = {}; // prevent duplicate parallel loads
+
+function getImage(fileName) {
+  if (imageCache[fileName]) return Promise.resolve(imageCache[fileName]);
+  if (_imageLoadPromises[fileName]) return _imageLoadPromises[fileName];
+
+  const file = imageFileMap[fileName];
+  if (!file) return Promise.resolve(null);
+
+  _imageLoadPromises[fileName] = new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      imageCache[fileName] = img;
+      delete _imageLoadPromises[fileName];
+      resolve(img);
+    };
+    img.onerror = () => { delete _imageLoadPromises[fileName]; reject(new Error('load failed')); };
+    img.src = url;
+  });
+  return _imageLoadPromises[fileName];
+}
+
+// ══════════════════════════════════════════
+// Crop with Mask (Canvas API)
+// ══════════════════════════════════════════
+async function getCropDataURL(annId) {
+  if (cropCache[annId]) return cropCache[annId];
+
+  const ann = annotations[annId];
+  if (!ann) return null;
+
+  const imgInfo = images[ann.image_id];
+  if (!imgInfo) return null;
+
+  const seg = ann.segmentation;
+  if (!seg || typeof seg !== 'object' || !seg.counts) return null;
+
+  try {
+    const img = await getImage(imgInfo.file_name);
+    if (!img) return null;
+    const h = img.height, w = img.width;
+
+    // Use COCO bbox if available (skip expensive mask scan)
+    let rmin, rmax, cmin, cmax;
+    const bbox = ann.bbox; // [x, y, width, height]
+    if (bbox && bbox.length === 4) {
+      cmin = Math.floor(bbox[0]);
+      rmin = Math.floor(bbox[1]);
+      cmax = Math.ceil(bbox[0] + bbox[2]);
+      rmax = Math.ceil(bbox[1] + bbox[3]);
+    } else {
+      // Fallback: decode mask and scan for bbox
+      const mask = decodeMask(seg, h, w);
+      rmin = h; rmax = 0; cmin = w; cmax = 0;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (mask[y * w + x]) {
+            if (y < rmin) rmin = y; if (y > rmax) rmax = y;
+            if (x < cmin) cmin = x; if (x > cmax) cmax = x;
+          }
+        }
+      }
+      if (rmin > rmax || cmin > cmax) return null;
+    }
+
+    // Padding
+    const pad = 5;
+    rmin = Math.max(0, rmin - pad);
+    rmax = Math.min(h - 1, rmax + pad);
+    cmin = Math.max(0, cmin - pad);
+    cmax = Math.min(w - 1, cmax + pad);
+
+    const cropW = cmax - cmin + 1;
+    const cropH = rmax - rmin + 1;
+
+    // Draw ONLY crop region to canvas (not full image)
+    const canvas = document.createElement('canvas');
+    canvas.width = cropW; canvas.height = cropH;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, cmin, rmin, cropW, cropH, 0, 0, cropW, cropH);
+
+    // Apply mask (set non-mask pixels to black)
+    const mask = decodeMask(seg, h, w);
+    const cropData = ctx.getImageData(0, 0, cropW, cropH);
+    const pixels = cropData.data;
+    for (let y = 0; y < cropH; y++) {
+      for (let x = 0; x < cropW; x++) {
+        if (!mask[(y + rmin) * w + (x + cmin)]) {
+          const i = (y * cropW + x) * 4;
+          pixels[i] = pixels[i + 1] = pixels[i + 2] = 0;
+        }
+      }
+    }
+    ctx.putImageData(cropData, 0, 0);
+
+    const dataURL = canvas.toDataURL('image/jpeg', 0.85);
+
+    // Cache (limit 500)
+    if (Object.keys(cropCache).length >= 500) {
+      delete cropCache[Object.keys(cropCache)[0]];
+    }
+    cropCache[annId] = dataURL;
+    return dataURL;
+  } catch (e) {
+    console.error('Crop error for ann', annId, e);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════
+// Crop Queue (concurrency limiter)
+// ══════════════════════════════════════════
+function enqueueCrop(annId, callback) {
+  cropQueue.push({ annId, callback });
+  drainCropQueue();
+}
+
+function drainCropQueue() {
+  while (cropQueue.length > 0 && cropRunning < MAX_CONCURRENT) {
+    cropRunning++;
+    const { annId, callback } = cropQueue.shift();
+    getCropDataURL(annId).then(callback).finally(() => {
+      cropRunning--;
+      drainCropQueue();
+    });
+  }
+}
+
+// ══════════════════════════════════════════
+// Dataset Loading
+// ══════════════════════════════════════════
+document.getElementById('datasetInput').addEventListener('change', async (e) => {
+  const files = e.target.files;
+  if (!files || files.length === 0) return;
+
+  document.getElementById('loadingOverlay').classList.remove('hidden');
+  document.getElementById('loadingProgress').textContent = 'Scanning files...';
+
+  // Small delay to let UI render
+  await new Promise(r => setTimeout(r, 50));
+
+  try {
+    // Find annotation JSON
+    let jsonFile = null;
+    imageFileMap = {};
+
+    for (const f of files) {
+      const rel = f.webkitRelativePath.replace(/\\/g, '/');
+      const parts = rel.split('/');
+
+      if (parts.length >= 3 && parts[parts.length - 2] === 'annotation' &&
+          f.name.toLowerCase().endsWith('.json') && !f.name.endsWith('.bak')) {
+        if (!jsonFile) jsonFile = f;
+      }
+
+      if (/\.(jpg|jpeg|png)$/i.test(f.name)) {
+        imageFileMap[f.name] = f;
+      }
+    }
+
+    if (!jsonFile) {
+      alert('annotation/*.json file not found in this folder.');
+      return;
+    }
+
+    document.getElementById('loadingProgress').textContent = 'Parsing JSON...';
+    await new Promise(r => setTimeout(r, 20));
+
+    const text = await jsonFile.text();
+    cocoData = JSON.parse(text);
+
+    // Parse categories
+    categories = {};
+    catNameToId = {};
+    for (const cat of (cocoData.categories || [])) {
+      categories[cat.id] = cat.name;
+      catNameToId[cat.name] = cat.id;
+    }
+
+    // Parse images
+    images = {};
+    imageFrameIndex = {};
+    (cocoData.images || []).forEach((img, idx) => {
+      images[img.id] = { file_name: img.file_name, width: img.width, height: img.height };
+      imageFrameIndex[img.id] = idx;
+    });
+
+    // Parse annotations
+    annotations = {};
+    byCategory = {};
+    byBarcode = {};
+    cropCache = {};
+    imageCache = {};
+    cropQueue.length = 0;
+
+    document.getElementById('loadingProgress').textContent = 'Indexing annotations...';
+    await new Promise(r => setTimeout(r, 20));
+
+    for (const ann of (cocoData.annotations || [])) {
+      annotations[ann.id] = ann;
+      const catName = categories[ann.category_id] || 'unknown';
+
+      if (!byCategory[catName]) byCategory[catName] = [];
+      byCategory[catName].push(ann.id);
+
+      if (catName === 'item') {
+        const barcode = (ann.attributes && ann.attributes.barcode) || '';
+        const key = barcode || '__no_barcode__';
+        if (!byBarcode[key]) byBarcode[key] = [];
+        byBarcode[key].push(ann.id);
+      }
+    }
+
+    // Build structure
+    buildStructure();
+
+    // Prepare categories list
+    allCategories = Object.entries(categories)
+      .map(([id, name]) => ({ id: parseInt(id), name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    // Reset state
+    errorSet.clear();
+    visitedSet.clear();
+    totalAnnotations = 0;
+    dirty = false;
+    for (const cat in structure) totalAnnotations += structure[cat].total;
+
+    // Show UI
+    document.getElementById('mainLayout').classList.remove('hidden');
+    document.getElementById('loadStatus').textContent =
+      totalAnnotations.toLocaleString() + ' annotations loaded';
+
+    renderSidebar();
+    const cats = Object.keys(structure);
+    if (cats.length > 0) selectCategory(cats[0]);
+    updateProgress();
+
+  } catch (err) {
+    alert('Load error: ' + err.message);
+    console.error(err);
+  } finally {
+    document.getElementById('loadingOverlay').classList.add('hidden');
+  }
+});
+
+function buildStructure() {
+  structure = {};
+  for (const catName in byCategory) {
+    const annIds = byCategory[catName];
+    if (catName === 'roi') continue;
+
+    if (catName === 'item') {
+      const groups = {};
+      const sortedBarcodes = Object.entries(byBarcode)
+        .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+
+      for (const [barcodeKey, bAnnIds] of sortedBarcodes) {
+        const displayKey = barcodeKey === '__no_barcode__' ? '(barcode none)' : barcodeKey;
+        const items = bAnnIds.map(aid => {
+          const ann = annotations[aid];
+          const img = images[ann.image_id] || {};
+          const attrs = ann.attributes || {};
+          return {
+            ann_id: aid,
+            barcode: attrs.barcode || '',
+            shipment_id: attrs.shipment_id || '',
+            image_file: img.file_name || '',
+            category: catName,
+          };
+        });
+        groups[displayKey] = items;
+      }
+      structure[catName] = { group_by: 'barcode', groups, total: annIds.length };
+    } else {
+      const items = annIds.map(aid => {
+        const ann = annotations[aid];
+        const img = images[ann.image_id] || {};
+        return {
+          ann_id: aid, barcode: '', shipment_id: '',
+          image_file: img.file_name || '', category: catName,
+        };
+      });
+      structure[catName] = { group_by: 'all', groups: { 'All': items }, total: annIds.length };
+    }
+  }
+}
+
+// ══════════════════════════════════════════
+// Sample Images
+// ══════════════════════════════════════════
+document.getElementById('sampleInput').addEventListener('change', (e) => {
+  const files = e.target.files;
+  if (!files || files.length === 0) return;
+
+  sampleFileMap = {};
+  for (const f of files) {
+    if (!/\.(jpg|jpeg|png)$/i.test(f.name)) continue;
+    const rel = f.webkitRelativePath.replace(/\\/g, '/');
+    const parts = rel.split('/');
+    // structure: rootFolder/barcode/image.jpg
+    if (parts.length >= 3) {
+      const barcode = parts[parts.length - 2];
+      if (!sampleFileMap[barcode]) sampleFileMap[barcode] = [];
+      sampleFileMap[barcode].push(f);
+    }
+  }
+
+  const count = Object.keys(sampleFileMap).length;
+  document.getElementById('sampleStatus').textContent = count + ' barcodes loaded';
+
+  // Refresh sample panel if visible
+  if (activeCategory === 'item' && activeGroup && activeGroup !== '(barcode none)') {
+    loadSamples(activeGroup);
+  }
+});
+
+// ══════════════════════════════════════════
+// Sidebar
+// ══════════════════════════════════════════
+function renderSidebar() {
+  const tree = document.getElementById('categoryTree');
+  tree.innerHTML = '';
+
+  for (const cat in structure) {
+    const info = structure[cat];
+    const li = document.createElement('li');
+    li.dataset.category = cat;
+    if (visitedSet.has('cat:' + cat)) li.classList.add('visited');
+    li.innerHTML = cat + ' <span class="badge">' + info.total + '</span>';
+    li.onclick = (e) => { e.stopPropagation(); selectCategory(cat); };
+    tree.appendChild(li);
+
+    if (cat === 'item' && info.group_by === 'barcode') {
+      for (const groupKey in info.groups) {
+        const subLi = document.createElement('li');
+        subLi.className = 'sub';
+        if (visitedSet.has('group:' + groupKey)) subLi.classList.add('visited');
+        subLi.dataset.category = cat;
+        subLi.dataset.group = groupKey;
+        const count = info.groups[groupKey].length;
+        subLi.innerHTML = groupKey + ' <span class="badge">' + count + '</span>';
+        subLi.onclick = (e) => { e.stopPropagation(); selectCategory(cat, groupKey); };
+        tree.appendChild(subLi);
+      }
+    }
+  }
+}
+
+function selectCategory(cat, group) {
+  activeCategory = cat;
+  activeGroup = group || null;
+
+  if (group) visitedSet.add('group:' + group);
+  else visitedSet.add('cat:' + cat);
+
+  document.querySelectorAll('#categoryTree li').forEach(li => {
+    li.classList.remove('active');
+    const liCat = li.dataset.category;
+    const liGroup = li.dataset.group;
+    if (liGroup && visitedSet.has('group:' + liGroup)) li.classList.add('visited');
+    if (!liGroup && liCat && visitedSet.has('cat:' + liCat)) li.classList.add('visited');
+    if (liCat === cat) {
+      if (!group && !liGroup) li.classList.add('active');
+      if (group && liGroup === group) li.classList.add('active');
+    }
+  });
+
+  renderContent();
+
+  const rightPanel = document.getElementById('contentRight');
+  if (cat === 'item' && group && group !== '(barcode none)') {
+    rightPanel.classList.remove('hidden');
+    loadSamples(group);
+  } else {
+    rightPanel.classList.add('hidden');
+  }
+}
+
+// ══════════════════════════════════════════
+// Sample Panel
+// ══════════════════════════════════════════
+function loadSamples(barcode) {
+  const header = document.getElementById('sampleHeader');
+  const grid = document.getElementById('sampleGrid');
+
+  const files = sampleFileMap[barcode] || [];
+  header.textContent = 'Samples: ' + barcode + ' (' + files.length + ')';
+  grid.innerHTML = '';
+
+  if (files.length === 0) {
+    grid.innerHTML = '<div class="sample-empty">No samples available</div>';
+    return;
+  }
+
+  for (const file of files) {
+    const card = document.createElement('div');
+    card.className = 'sample-card';
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src = URL.createObjectURL(file);
+    img.alt = file.name;
+    card.appendChild(img);
+    const name = document.createElement('div');
+    name.className = 'sample-name';
+    name.textContent = file.name;
+    card.appendChild(name);
+    grid.appendChild(card);
+  }
+}
+
+// ══════════════════════════════════════════
+// Content Rendering
+// ══════════════════════════════════════════
+const PAGE_SIZE = 50;
+let renderedGroups = {};
+
+function renderContent() {
+  // Clear pending crop queue when switching views
+  cropQueue.length = 0;
+
+  const container = document.getElementById('groupContainer');
+  container.innerHTML = '';
+  renderedGroups = {};
+
+  if (!activeCategory || !structure[activeCategory]) return;
+
+  const info = structure[activeCategory];
+  document.getElementById('contentHeader').textContent =
+    activeCategory + ' (' + info.total + ' annotations)';
+
+  const groups = info.groups;
+  const groupKeys = activeGroup ? [activeGroup] : Object.keys(groups);
+
+  for (const gk of groupKeys) {
+    const items = groups[gk];
+    if (!items || items.length === 0) continue;
+
+    const filteredItems = items.filter(it => matchesItemFilter(it));
+    if (filteredItems.length === 0) continue;
+
+    const section = document.createElement('div');
+    section.className = 'group-section';
+
+    const gh = document.createElement('div');
+    gh.className = 'group-header';
+    let metaHtml = '';
+    if (activeCategory === 'item') {
+      const sids = [...new Set(filteredItems.map(i => i.shipment_id).filter(Boolean))];
+      metaHtml = '<span class="group-meta">' + sids.length + ' shipments</span>';
+    }
+    gh.innerHTML = '<h3>' + gk + '</h3>' + metaHtml +
+      '<span class="group-badge">' + filteredItems.length + ' items</span>';
+    gh.onclick = () => {
+      const body = section.querySelector('.group-body');
+      body.classList.toggle('collapsed');
+    };
+    section.appendChild(gh);
+
+    const gb = document.createElement('div');
+    gb.className = 'group-body';
+    const grid = document.createElement('div');
+    grid.className = 'items-grid';
+    gb.appendChild(grid);
+
+    renderedGroups[gk] = 0;
+    renderItemsPage(grid, filteredItems, gk);
+
+    if (filteredItems.length > PAGE_SIZE) {
+      const btn = document.createElement('button');
+      btn.className = 'load-more-btn';
+      btn.textContent = 'Load More (' + PAGE_SIZE + ')';
+      btn.onclick = () => renderItemsPage(grid, filteredItems, gk, btn);
+      gb.appendChild(btn);
+    }
+
+    section.appendChild(gb);
+    container.appendChild(section);
+  }
+}
+
+function renderItemsPage(grid, items, groupKey, loadMoreBtn) {
+  const start = renderedGroups[groupKey] || 0;
+  const end = Math.min(start + PAGE_SIZE, items.length);
+
+  for (let i = start; i < end; i++) {
+    grid.appendChild(createItemCard(items[i]));
+  }
+  renderedGroups[groupKey] = end;
+
+  if (loadMoreBtn && end >= items.length) {
+    loadMoreBtn.style.display = 'none';
+  }
+}
+
+function createItemCard(item) {
+  const card = document.createElement('div');
+  card.className = 'item-card' + (errorSet.has(item.ann_id) ? ' error' : '');
+  card.dataset.annId = item.ann_id;
+
+  // Lazy-load crop image
+  const placeholder = document.createElement('div');
+  placeholder.style.cssText = 'width:100%;height:150px;background:#222;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px;';
+  placeholder.textContent = 'Loading...';
+  card.appendChild(placeholder);
+
+  // Load crop async (throttled)
+  enqueueCrop(item.ann_id, (dataURL) => {
+    if (dataURL) {
+      const img = document.createElement('img');
+      img.src = dataURL;
+      img.alt = item.category + ' ' + item.ann_id;
+      if (card.contains(placeholder)) card.replaceChild(img, placeholder);
+    } else {
+      placeholder.textContent = '[No crop]';
+    }
+  });
+
+  const meta = document.createElement('div');
+  meta.className = 'item-meta';
+
+  if (item.shipment_id) {
+    const sid = document.createElement('div');
+    sid.className = 'sid';
+    sid.textContent = 'Ship: ' + item.shipment_id;
+    meta.appendChild(sid);
+  }
+
+  const src = document.createElement('div');
+  src.className = 'src';
+  src.textContent = item.image_file;
+  meta.appendChild(src);
+
+  // Category dropdown
+  if (allCategories.length > 0) {
+    const catDiv = document.createElement('div');
+    catDiv.className = 'category-edit';
+    const catLabel = document.createElement('label');
+    catLabel.textContent = 'Class:';
+    const catSelect = document.createElement('select');
+    catSelect.dataset.annId = item.ann_id;
+    catSelect.dataset.original = item.category;
+    for (const cat of allCategories) {
+      const opt = document.createElement('option');
+      opt.value = cat.name;
+      opt.textContent = cat.name;
+      if (cat.name === item.category) opt.selected = true;
+      catSelect.appendChild(opt);
+    }
+    catSelect.addEventListener('change', (e) => handleCategoryEdit(e.target));
+    catDiv.appendChild(catLabel);
+    catDiv.appendChild(catSelect);
+    meta.appendChild(catDiv);
+  }
+
+  // Barcode editor
+  if (item.category === 'item') {
+    const bcDiv = document.createElement('div');
+    bcDiv.className = 'barcode-edit';
+    const lbl = document.createElement('label');
+    lbl.textContent = 'BC:';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = item.barcode || '';
+    inp.dataset.annId = item.ann_id;
+    inp.dataset.original = item.barcode || '';
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+    inp.addEventListener('blur', (e) => handleBarcodeEdit(e.target));
+    bcDiv.appendChild(lbl);
+    bcDiv.appendChild(inp);
+    meta.appendChild(bcDiv);
+  }
+
+  // Error checkbox
+  const chk = document.createElement('div');
+  chk.className = 'chk';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = errorSet.has(item.ann_id);
+  cb.dataset.annId = item.ann_id;
+  cb.onchange = () => toggleError(item.ann_id, cb.checked, card);
+  const cbLabel = document.createElement('label');
+  cbLabel.textContent = 'Error';
+  cbLabel.onclick = () => { cb.checked = !cb.checked; cb.onchange(); };
+  chk.appendChild(cb);
+  chk.appendChild(cbLabel);
+  meta.appendChild(chk);
+
+  card.appendChild(meta);
+  return card;
+}
+
+// ══════════════════════════════════════════
+// Error Toggle
+// ══════════════════════════════════════════
+function toggleError(annId, isError, card) {
+  if (isError) { errorSet.add(annId); card.classList.add('error'); }
+  else { errorSet.delete(annId); card.classList.remove('error'); }
+  updateProgress();
+}
+
+function updateProgress() {
+  const count = errorSet.size;
+  document.getElementById('errorCount').textContent = count.toLocaleString();
+  document.getElementById('totalCount').textContent = totalAnnotations.toLocaleString();
+  const pct = totalAnnotations > 0 ? (count / totalAnnotations * 100) : 0;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('btnExport').disabled = count === 0;
+}
+
+// ══════════════════════════════════════════
+// Category Edit
+// ══════════════════════════════════════════
+function handleCategoryEdit(select) {
+  const annId = parseInt(select.dataset.annId);
+  const newVal = select.value;
+  const oldVal = select.dataset.original;
+  if (newVal === oldVal) return;
+
+  const ann = annotations[annId];
+  if (!ann) return;
+
+  const oldCatName = categories[ann.category_id] || 'unknown';
+  const newCatId = catNameToId[newVal];
+  if (newCatId === undefined) return;
+
+  // Update by_category
+  if (byCategory[oldCatName]) {
+    byCategory[oldCatName] = byCategory[oldCatName].filter(id => id !== annId);
+    if (byCategory[oldCatName].length === 0) delete byCategory[oldCatName];
+  }
+  if (!byCategory[newVal]) byCategory[newVal] = [];
+  byCategory[newVal].push(annId);
+
+  // Update by_barcode
+  if (oldCatName === 'item') {
+    const barcode = (ann.attributes && ann.attributes.barcode) || '';
+    const oldKey = barcode || '__no_barcode__';
+    if (byBarcode[oldKey]) {
+      byBarcode[oldKey] = byBarcode[oldKey].filter(id => id !== annId);
+      if (byBarcode[oldKey].length === 0) delete byBarcode[oldKey];
+    }
+  }
+  if (newVal === 'item') {
+    if (!byBarcode['__no_barcode__']) byBarcode['__no_barcode__'] = [];
+    byBarcode['__no_barcode__'].push(annId);
+  }
+
+  // Update annotation
+  ann.category_id = newCatId;
+  const defaultAttrs = newVal === 'item' ? { barcode: '', shipment_id: '' } :
+                       newVal === 'roi' ? {} : { iscrowd: '0' };
+  ann.attributes = defaultAttrs;
+
+  // Update raw data
+  const rawAnn = cocoData.annotations.find(a => a.id === annId);
+  if (rawAnn) {
+    rawAnn.category_id = newCatId;
+    rawAnn.attributes = { ...defaultAttrs };
+  }
+
+  select.dataset.original = newVal;
+  dirty = true;
+
+  buildStructure();
+  totalAnnotations = 0;
+  for (const cat in structure) totalAnnotations += structure[cat].total;
+  renderSidebar();
+  renderContent();
+  updateProgress();
+}
+
+// ══════════════════════════════════════════
+// Barcode Edit
+// ══════════════════════════════════════════
+function handleBarcodeEdit(input) {
+  const annId = parseInt(input.dataset.annId);
+  const newVal = input.value.trim();
+  const oldVal = input.dataset.original;
+  if (newVal === oldVal) return;
+
+  const ann = annotations[annId];
+  if (!ann) return;
+
+  const oldBarcode = (ann.attributes && ann.attributes.barcode) || '';
+  const oldKey = oldBarcode || '__no_barcode__';
+  const newKey = newVal || '__no_barcode__';
+
+  if (!ann.attributes) ann.attributes = {};
+  ann.attributes.barcode = newVal;
+
+  // Re-index
+  if (byBarcode[oldKey]) {
+    byBarcode[oldKey] = byBarcode[oldKey].filter(id => id !== annId);
+    if (byBarcode[oldKey].length === 0) delete byBarcode[oldKey];
+  }
+  if (!byBarcode[newKey]) byBarcode[newKey] = [];
+  byBarcode[newKey].push(annId);
+
+  // Update raw data
+  const rawAnn = cocoData.annotations.find(a => a.id === annId);
+  if (rawAnn) {
+    if (!rawAnn.attributes) rawAnn.attributes = {};
+    rawAnn.attributes.barcode = newVal;
+  }
+
+  input.dataset.original = newVal;
+  input.classList.add('saved');
+  setTimeout(() => input.classList.remove('saved'), 1500);
+  dirty = true;
+
+  buildStructure();
+  renderSidebar();
+  renderContent();
+}
+
+// ══════════════════════════════════════════
+// Download Modified JSON
+// ══════════════════════════════════════════
+function downloadModifiedJSON() {
+  if (!cocoData) { alert('No dataset loaded.'); return; }
+
+  const jsonStr = JSON.stringify(cocoData, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'instances_modified.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  dirty = false;
+}
+
+// ══════════════════════════════════════════
+// Excel Export (ExcelJS CDN)
+// ══════════════════════════════════════════
+function loadExcelJS() {
+  return new Promise((resolve, reject) => {
+    if (window.ExcelJS) return resolve(window.ExcelJS);
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    s.onload = () => resolve(window.ExcelJS);
+    s.onerror = () => reject(new Error('Failed to load ExcelJS'));
+    document.head.appendChild(s);
+  });
+}
+
+async function exportXlsx() {
+  if (errorSet.size === 0) { alert('No error items checked.'); return; }
+
+  const btn = document.getElementById('btnExport');
+  btn.textContent = 'Exporting...';
+  btn.disabled = true;
+
+  try {
+    const ExcelJS = await loadExcelJS();
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('errors');
+
+    // Headers
+    ws.columns = [
+      { header: 'barcode', key: 'barcode', width: 20 },
+      { header: 'shipment_id', key: 'shipment_id', width: 22 },
+      { header: 'category', key: 'category', width: 14 },
+      { header: 'annotation_id', key: 'annotation_id', width: 14 },
+      { header: 'frame', key: 'frame', width: 10 },
+      { header: 'source_image', key: 'source_image', width: 55 },
+      { header: 'crop_image', key: 'crop_image', width: 20 },
+    ];
+
+    // Bold headers
+    ws.getRow(1).font = { bold: true };
+
+    const THUMB_HEIGHT = 80;
+    const annIds = [...errorSet];
+
+    for (let i = 0; i < annIds.length; i++) {
+      const annId = annIds[i];
+      const ann = annotations[annId];
+      if (!ann) continue;
+
+      const imgInfo = images[ann.image_id] || {};
+      const attrs = ann.attributes || {};
+      const catName = categories[ann.category_id] || 'unknown';
+      const frame = imageFrameIndex[ann.image_id] !== undefined ? imageFrameIndex[ann.image_id] : -1;
+
+      const row = ws.addRow({
+        barcode: attrs.barcode || '',
+        shipment_id: attrs.shipment_id || '',
+        category: catName,
+        annotation_id: annId,
+        frame: frame,
+        source_image: imgInfo.file_name || '',
+        crop_image: '',
+      });
+
+      // Add crop thumbnail
+      try {
+        const dataURL = await getCropDataURL(annId);
+        if (dataURL) {
+          const base64 = dataURL.split(',')[1];
+          const imgId = wb.addImage({ base64, extension: 'jpeg' });
+
+          // Calculate thumbnail dimensions
+          const imgEl = new Image();
+          await new Promise(r => { imgEl.onload = r; imgEl.src = dataURL; });
+          const ratio = THUMB_HEIGHT / imgEl.height;
+          const tw = Math.max(1, Math.round(imgEl.width * ratio));
+
+          ws.addImage(imgId, {
+            tl: { col: 6, row: row.number - 1 },
+            ext: { width: tw, height: THUMB_HEIGHT },
+          });
+        }
+      } catch (e) {
+        row.getCell(7).value = '[thumbnail error]';
+      }
+
+      row.height = THUMB_HEIGHT * 0.75;
+    }
+
+    // Download
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'error_items.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+
+  } catch (e) {
+    alert('Export failed: ' + e.message);
+    console.error(e);
+  } finally {
+    btn.textContent = 'Export XLSX';
+    btn.disabled = errorSet.size === 0;
+  }
+}
+
+// ══════════════════════════════════════════
+// Filters
+// ══════════════════════════════════════════
+function matchesItemFilter(item) {
+  const query = document.getElementById('searchInput').value.toLowerCase();
+  const status = document.getElementById('statusFilter').value;
+
+  if (query) {
+    const match =
+      item.image_file.toLowerCase().includes(query) ||
+      (item.barcode && item.barcode.toLowerCase().includes(query)) ||
+      (item.shipment_id && item.shipment_id.toLowerCase().includes(query)) ||
+      (item.category && item.category.toLowerCase().includes(query)) ||
+      String(item.ann_id).includes(query);
+    if (!match) return false;
+  }
+
+  if (status === 'has_error') return errorSet.has(item.ann_id);
+  if (status === 'no_error') return !errorSet.has(item.ann_id);
+  return true;
+}
+
+document.getElementById('searchInput').addEventListener('input', () => renderContent());
+document.getElementById('statusFilter').addEventListener('change', () => renderContent());
+
+// ══════════════════════════════════════════
+// Keyboard Navigation
+// ══════════════════════════════════════════
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  const tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
+  e.preventDefault();
+  const items = [...document.querySelectorAll('#categoryTree li')];
+  if (items.length === 0) return;
+
+  const activeIdx = items.findIndex(li => li.classList.contains('active'));
+  let nextIdx;
+  if (e.key === 'ArrowDown') nextIdx = activeIdx < items.length - 1 ? activeIdx + 1 : 0;
+  else nextIdx = activeIdx > 0 ? activeIdx - 1 : items.length - 1;
+
+  const target = items[nextIdx];
+  selectCategory(target.dataset.category, target.dataset.group);
+  target.scrollIntoView({ block: 'nearest' });
+});
+</script>
+</body>
+</html>

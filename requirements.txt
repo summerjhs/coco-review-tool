@@ -1,0 +1,7 @@
+flask>=2.3
+opencv-python>=4.8
+numpy>=1.24
+pycocotools>=2.0
+Pillow>=10.0
+openpyxl>=3.1
+waitress>=3.0
