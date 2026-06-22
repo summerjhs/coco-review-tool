@@ -190,58 +190,84 @@ function generateColor(i, n) {
 }
 
 // =================================================================
-// COCO RLE Decode (port of pycocotools)
+// COCO RLE Decode (faithful port of pycocotools rlelib.c)
 // =================================================================
-function decodeCompressedRLE(counts_str, h, w) {
-  // Decode COCO compressed RLE string to counts array
+function rleFrString(counts_str) {
+  // Decode COCO compressed RLE string → run-length counts array
   const cnts = [];
   let p = 0;
   while (p < counts_str.length) {
     let x = 0, k = 0, more = true;
-    while (more) {
+    while (more && p < counts_str.length) {
       const c = counts_str.charCodeAt(p) - 48;
       x |= (c & 0x1f) << (5 * k);
       more = (c & 0x20) !== 0;
       p++; k++;
     }
-    // Sign extension
-    if (k > 0 && (counts_str.charCodeAt(p - 1) - 48) & 0x10) {
+    // Sign extension on the last chunk
+    if (k > 0 && ((counts_str.charCodeAt(p - 1) - 48) & 0x10)) {
       x |= -(1 << (5 * k));
     }
-    // Delta decode (cumulative from index m-2)
-    if (cnts.length > 1) x += cnts[cnts.length - 2];
+    // Delta decode: cnts[m] += cnts[m-2] for m > 2 (matching pycocotools C code)
+    if (cnts.length > 2) x += cnts[cnts.length - 2];
     cnts.push(x);
   }
-  // Convert counts to binary mask (column-major order)
+  return cnts;
+}
+
+function rleToMask(cnts, h, w) {
+  // Convert run-length counts to column-major binary mask
   const mask = new Uint8Array(h * w);
   let idx = 0, val = 0;
   for (let i = 0; i < cnts.length; i++) {
-    const run = cnts[i];
-    for (let j = 0; j < run && idx < h * w; j++) {
-      mask[idx++] = val;
-    }
-    val = 1 - val;
-  }
-  return mask; // column-major: pixel(y,x) = mask[x*h + y]
-}
-
-function decodeUncompressedRLE(counts_arr, h, w) {
-  const mask = new Uint8Array(h * w);
-  let idx = 0, val = 0;
-  for (let i = 0; i < counts_arr.length; i++) {
-    const run = counts_arr[i];
-    for (let j = 0; j < run && idx < h * w; j++) {
-      mask[idx++] = val;
-    }
+    const end = Math.min(idx + cnts[i], h * w);
+    if (val) { for (let j = idx; j < end; j++) mask[j] = 1; }
+    idx = end;
     val = 1 - val;
   }
   return mask;
 }
 
+function decodeSegmentation(seg, h, w) {
+  // Returns {mask: Uint8Array (column-major), cnts: number[]} or null
+  if (!seg) return null;
+  if (typeof seg === 'object' && !Array.isArray(seg) && seg.counts) {
+    const sh = seg.size[0], sw = seg.size[1];
+    let cnts;
+    if (typeof seg.counts === 'string') {
+      cnts = rleFrString(seg.counts);
+    } else {
+      cnts = seg.counts.slice(); // uncompressed RLE
+    }
+    const mask = rleToMask(cnts, sh, sw);
+    return { mask, h: sh, w: sw, cnts };
+  }
+  return null; // polygon handled separately
+}
+
 function getMaskPixel(mask, h, x, y) {
-  // Column-major access
-  if (x < 0 || y < 0 || y >= h) return 0;
-  return mask[x * h + y] || 0;
+  // Column-major: pixel at (row=y, col=x) is mask[x*h + y]
+  if (x < 0 || y < 0 || x * h + y >= mask.length) return 0;
+  return mask[x * h + y];
+}
+
+// Paint RLE mask runs directly onto RGBA ImageData (fast: skips background runs)
+function paintMaskOnImageData(od, cnts, mh, mw, canvasW, r, g, b, a) {
+  let pixelIdx = 0, val = 0;
+  for (let i = 0; i < cnts.length; i++) {
+    if (val) {
+      const end = Math.min(pixelIdx + cnts[i], mh * mw);
+      for (let j = pixelIdx; j < end; j++) {
+        // Column-major → (col, row)
+        const col = (j / mh) | 0;
+        const row = j % mh;
+        const pi = (row * canvasW + col) * 4;
+        od[pi] = r; od[pi+1] = g; od[pi+2] = b; od[pi+3] = a;
+      }
+    }
+    pixelIdx += cnts[i];
+    val = 1 - val;
+  }
 }
 
 // =================================================================
@@ -459,22 +485,13 @@ async function loadAndRender() {
 }
 
 function decodeMasksForImage(imgInfo) {
-  decodedMasks = {};
+  decodedMasks = {};   // ann_id -> {mask, h, w, cnts}
   const anns = annByImage[imgInfo.id] || [];
-  const h = imgInfo.height, w = imgInfo.width;
   for (const ann of anns) {
     if (ann.category_id === roiCatId) continue;
-    const seg = ann.segmentation;
-    if (!seg) continue;
     try {
-      if (typeof seg === 'object' && !Array.isArray(seg) && seg.counts) {
-        if (typeof seg.counts === 'string') {
-          decodedMasks[ann.id] = decodeCompressedRLE(seg.counts, seg.size[0], seg.size[1]);
-        } else {
-          decodedMasks[ann.id] = decodeUncompressedRLE(seg.counts, seg.size[0], seg.size[1]);
-        }
-      }
-      // Polygon: stored as [[x,y,x,y,...], ...] - decode on render
+      const decoded = decodeSegmentation(ann.segmentation, imgInfo.height, imgInfo.width);
+      if (decoded) decodedMasks[ann.id] = decoded;
     } catch(e) { console.warn('Mask decode error ann', ann.id, e); }
   }
 }
@@ -482,178 +499,210 @@ function decodeMasksForImage(imgInfo) {
 // =================================================================
 // Canvas rendering
 // =================================================================
+const MAX_CANVAS = 1920; // cap resolution for performance
+
 function renderCurrent() {
   if (!currentImage || currentIdx < 0) return;
   const imgInfo = imageList[currentIdx];
   const canvas = document.getElementById('mainCanvas');
   const ctx = canvas.getContext('2d');
-  const w = imgInfo.width, h = imgInfo.height;
-  canvas.width = w;
-  canvas.height = h;
+  const ow = imgInfo.width, oh = imgInfo.height;
 
-  // Draw image
-  ctx.drawImage(currentImage, 0, 0, w, h);
+  // Cap canvas size for performance (scale down if needed)
+  let scale = 1;
+  if (ow > MAX_CANVAS || oh > MAX_CANVAS) scale = Math.min(MAX_CANVAS / ow, MAX_CANVAS / oh);
+  const cw = Math.round(ow * scale), ch = Math.round(oh * scale);
+  canvas.width = cw; canvas.height = ch;
+
+  ctx.drawImage(currentImage, 0, 0, cw, ch);
 
   const showRoi = document.getElementById('chkRoi').checked;
   const showMask = document.getElementById('chkMask').checked;
   const showLabel = document.getElementById('chkLabel').checked;
   const anns = annByImage[imgInfo.id] || [];
-  const alpha = 0.35;
+  const alphaVal = Math.round(0.35 * 255);
 
-  // Error ann_ids for this image
   const errorIds = new Set();
   for (const [k, m] of Object.entries(memos)) {
     if (m.image_id === imgInfo.id && m.type !== 'missing') errorIds.add(m.ann_id);
   }
 
-  // Draw masks
+  // ---- Mask overlay ----
   if (showMask) {
-    // Create overlay ImageData
-    const overlay = ctx.createImageData(w, h);
+    const overlay = ctx.createImageData(cw, ch);
     const od = overlay.data;
 
     for (const ann of anns) {
       if (ann.category_id === roiCatId) continue;
       const color = catColors[ann.category_id] || {r:200,g:200,b:200};
-      const mask = decodedMasks[ann.id];
+      const md = decodedMasks[ann.id];
 
-      if (mask) {
-        // RLE mask (column-major)
-        for (let x = 0; x < w; x++) {
-          for (let y = 0; y < h; y++) {
-            if (mask[x * h + y]) {
-              const pi = (y * w + x) * 4;
-              od[pi] = color.r; od[pi+1] = color.g; od[pi+2] = color.b;
-              od[pi+3] = Math.round(alpha * 255);
+      if (md && md.cnts) {
+        // RLE: paint directly from run-length counts (fast, skips bg runs)
+        if (scale === 1) {
+          paintMaskOnImageData(od, md.cnts, md.h, md.w, cw, color.r, color.g, color.b, alphaVal);
+        } else {
+          // Scaled: iterate foreground runs, map to canvas coords
+          let pixelIdx = 0, val = 0;
+          for (let i = 0; i < md.cnts.length; i++) {
+            if (val) {
+              const end = Math.min(pixelIdx + md.cnts[i], md.h * md.w);
+              for (let j = pixelIdx; j < end; j++) {
+                const col = (j / md.h) | 0;
+                const row = j % md.h;
+                const sx = (col * scale) | 0, sy = (row * scale) | 0;
+                if (sx < cw && sy < ch) {
+                  const pi = (sy * cw + sx) * 4;
+                  od[pi] = color.r; od[pi+1] = color.g; od[pi+2] = color.b; od[pi+3] = alphaVal;
+                }
+              }
             }
+            pixelIdx += md.cnts[i];
+            val = 1 - val;
           }
         }
       } else if (Array.isArray(ann.segmentation)) {
-        // Polygon: draw filled on a temp canvas, read back
+        // Polygon: draw on temp canvas
         const tc = document.createElement('canvas');
-        tc.width = w; tc.height = h;
+        tc.width = cw; tc.height = ch;
         const tctx = tc.getContext('2d');
-        tctx.fillStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
+        tctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.35)`;
         for (const poly of ann.segmentation) {
           if (poly.length < 6) continue;
           tctx.beginPath();
-          tctx.moveTo(poly[0], poly[1]);
-          for (let i = 2; i < poly.length; i += 2) tctx.lineTo(poly[i], poly[i+1]);
-          tctx.closePath();
-          tctx.fill();
+          tctx.moveTo(poly[0]*scale, poly[1]*scale);
+          for (let i = 2; i < poly.length; i += 2) tctx.lineTo(poly[i]*scale, poly[i+1]*scale);
+          tctx.closePath(); tctx.fill();
         }
-        // Composite polygon overlay
-        const td = tctx.getImageData(0, 0, w, h).data;
+        const td = tctx.getImageData(0, 0, cw, ch).data;
         for (let i = 0; i < td.length; i += 4) {
-          if (td[i+3] > 0) { od[i] = td[i]; od[i+1] = td[i+1]; od[i+2] = td[i+2]; od[i+3] = td[i+3]; }
+          if (td[i+3] > 0) { od[i]=td[i]; od[i+1]=td[i+1]; od[i+2]=td[i+2]; od[i+3]=td[i+3]; }
         }
       }
     }
-    // Composite overlay onto canvas
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = w; tempCanvas.height = h;
-    const tctx2 = tempCanvas.getContext('2d');
-    tctx2.putImageData(overlay, 0, 0);
-    ctx.drawImage(tempCanvas, 0, 0);
+
+    // Composite overlay
+    const tc2 = document.createElement('canvas');
+    tc2.width = cw; tc2.height = ch;
+    tc2.getContext('2d').putImageData(overlay, 0, 0);
+    ctx.drawImage(tc2, 0, 0);
   }
 
-  // Draw contours + labels
-  for (const ann of anns) {
-    if (ann.category_id === roiCatId) continue;
-    const color = catColors[ann.category_id] || {r:200,g:200,b:200};
-    const colorStr = `rgb(${color.r},${color.g},${color.b})`;
+  // ---- Contours ----
+  if (showMask) {
+    for (const ann of anns) {
+      if (ann.category_id === roiCatId) continue;
+      const color = catColors[ann.category_id] || {r:200,g:200,b:200};
+      const colorStr = `rgb(${color.r},${color.g},${color.b})`;
+      ctx.strokeStyle = colorStr;
+      ctx.lineWidth = 1;
 
-    // Contour
-    if (showMask) {
       if (Array.isArray(ann.segmentation)) {
-        ctx.strokeStyle = colorStr;
-        ctx.lineWidth = 1;
         for (const poly of ann.segmentation) {
           if (poly.length < 6) continue;
           ctx.beginPath();
-          ctx.moveTo(poly[0], poly[1]);
-          for (let i = 2; i < poly.length; i += 2) ctx.lineTo(poly[i], poly[i+1]);
-          ctx.closePath();
-          ctx.stroke();
+          ctx.moveTo(poly[0]*scale, poly[1]*scale);
+          for (let i = 2; i < poly.length; i += 2) ctx.lineTo(poly[i]*scale, poly[i+1]*scale);
+          ctx.closePath(); ctx.stroke();
         }
-      } else if (decodedMasks[ann.id] && ann.bbox) {
-        // For RLE masks, draw bbox as thin contour
-        const [bx, by, bw, bh] = ann.bbox;
-        ctx.strokeStyle = colorStr;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(bx, by, bw, bh);
+      } else if (decodedMasks[ann.id]) {
+        // RLE contour: draw boundary pixels from mask
+        drawMaskContour(ctx, decodedMasks[ann.id], scale, colorStr);
       }
     }
+  }
 
-    // Error highlight
-    if (errorIds.has(ann.id) && ann.bbox) {
-      const [bx, by, bw, bh] = ann.bbox;
-      ctx.strokeStyle = 'red';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(bx, by, bw, bh);
-      ctx.fillStyle = 'red';
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillText('!', bx + bw - 18, by + 18);
-    }
+  // ---- Error highlights ----
+  for (const ann of anns) {
+    if (!errorIds.has(ann.id) || !ann.bbox) continue;
+    const [bx,by,bw,bh] = ann.bbox.map(v => v * scale);
+    ctx.strokeStyle = 'red'; ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, bw, bh);
+    ctx.fillStyle = 'red'; ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('!', bx+bw-16, by+16);
+  }
 
-    // Label
-    if (showLabel && ann.bbox) {
-      const [bx, by, bw, bh] = ann.bbox;
-      const cx = bx + bw/2, cy = by + bh/2;
+  // ---- Labels ----
+  if (showLabel) {
+    for (const ann of anns) {
+      if (ann.category_id === roiCatId || !ann.bbox) continue;
+      const color = catColors[ann.category_id] || {r:200,g:200,b:200};
+      const colorStr = `rgb(${color.r},${color.g},${color.b})`;
+      const [bx,by,bw,bh] = ann.bbox;
+      const cx = (bx+bw/2)*scale, cy = (by+bh/2)*scale;
       const catName = catNames[ann.category_id] || String(ann.category_id);
       const attrs = ann.attributes || {};
-      const barcode = attrs.barcode || '';
-      const shipment = attrs.shipment_id || '';
+      const barcode = attrs.barcode || '', shipment = attrs.shipment_id || '';
 
       ctx.font = '11px sans-serif';
-      let lines = [];
+      const lines = [];
       if (barcode || shipment) {
         lines.push(barcode ? `${catName} | ${barcode}` : catName);
         if (shipment) lines.push(`ship: ${shipment}`);
-      } else {
-        lines.push(catName);
-      }
+      } else { lines.push(catName); }
 
       lines.forEach((line, li) => {
         const tw = ctx.measureText(line).width;
-        const tx = cx - tw/2, ty = cy - (lines.length - 1) * 7 + li * 14;
+        const tx = cx-tw/2, ty = cy-(lines.length-1)*7+li*14;
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(tx - 2, ty - 11, tw + 4, 14);
+        ctx.fillRect(tx-2, ty-11, tw+4, 14);
         ctx.fillStyle = colorStr;
         ctx.fillText(line, tx, ty);
       });
     }
   }
 
-  // ROI (dashed)
+  // ---- ROI (dashed) ----
   if (showRoi && roiCatId !== null) {
     for (const ann of anns) {
       if (ann.category_id !== roiCatId || !ann.bbox) continue;
-      const [bx, by, bw, bh] = ann.bbox;
+      const [bx,by,bw,bh] = ann.bbox.map(v => v*scale);
       const rc = catColors[roiCatId] || {r:225,g:45,b:45};
       ctx.strokeStyle = `rgb(${rc.r},${rc.g},${rc.b})`;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([15, 8]);
-      ctx.strokeRect(bx, by, bw, bh);
+      ctx.lineWidth = 1; ctx.setLineDash([15,8]);
+      ctx.strokeRect(bx,by,bw,bh);
       ctx.setLineDash([]);
-      // ROI label
       ctx.font = '12px sans-serif';
       const tw = ctx.measureText('ROI').width;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(bx + 4, by + 4, tw + 6, 16);
+      ctx.fillRect(bx+4,by+4,tw+6,16);
       ctx.fillStyle = `rgb(${rc.r},${rc.g},${rc.b})`;
-      ctx.fillText('ROI', bx + 7, by + 16);
+      ctx.fillText('ROI', bx+7, by+16);
     }
   }
 
-  // HUD
+  // ---- HUD ----
   ctx.font = '12px sans-serif';
   const hud = `[${currentIdx+1}/${imageList.length}] ${imgInfo.file_name}  (${anns.length} ann)`;
   const tw = ctx.measureText(hud).width;
-  ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(4, 4, tw + 10, 18);
-  ctx.fillStyle = '#fff';
-  ctx.fillText(hud, 9, 17);
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(4,4,tw+10,18);
+  ctx.fillStyle = '#fff'; ctx.fillText(hud, 9, 17);
+
+  // Store scale for hit test
+  canvas._renderScale = scale;
+}
+
+// Draw RLE mask contour on canvas (boundary pixels only)
+function drawMaskContour(ctx, md, scale, colorStr) {
+  const {mask, h, w} = md;
+  // Sample boundary: check every pixel against neighbors
+  // For performance, only check within bbox
+  ctx.fillStyle = colorStr;
+  const step = scale < 0.6 ? 2 : 1; // skip pixels if heavily downscaled
+  for (let col = 0; col < w; col += step) {
+    for (let row = 0; row < h; row += step) {
+      if (!mask[col * h + row]) continue;
+      // Check if boundary (any 4-neighbor is 0 or edge)
+      const isBoundary =
+        col === 0 || row === 0 || col === w-1 || row === h-1 ||
+        !mask[(col-1)*h + row] || !mask[(col+1)*h + row] ||
+        !mask[col*h + row-1] || !mask[col*h + row+1];
+      if (isBoundary) {
+        const sx = (col * scale) | 0, sy = (row * scale) | 0;
+        ctx.fillRect(sx, sy, 1, 1);
+      }
+    }
+  }
 }
 
 function drawText(msg) {
@@ -672,10 +721,14 @@ document.getElementById('mainCanvas').addEventListener('click', e => {
   if (currentIdx < 0) return;
   const canvas = e.target;
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const x = Math.round((e.clientX - rect.left) * scaleX);
-  const y = Math.round((e.clientY - rect.top) * scaleY);
+  // Map click to canvas coords, then to original image coords
+  const renderScale = canvas._renderScale || 1;
+  const dispScaleX = canvas.width / rect.width;
+  const dispScaleY = canvas.height / rect.height;
+  const canvasX = (e.clientX - rect.left) * dispScaleX;
+  const canvasY = (e.clientY - rect.top) * dispScaleY;
+  const x = Math.round(canvasX / renderScale);
+  const y = Math.round(canvasY / renderScale);
   const imgInfo = imageList[currentIdx];
 
   // Find hit annotation (smallest area first)
@@ -685,9 +738,9 @@ document.getElementById('mainCanvas').addEventListener('click', e => {
 
   let hit = null;
   for (const ann of anns) {
-    const mask = decodedMasks[ann.id];
-    if (mask) {
-      if (getMaskPixel(mask, imgInfo.height, x, y)) { hit = ann; break; }
+    const md = decodedMasks[ann.id];
+    if (md && md.mask) {
+      if (getMaskPixel(md.mask, md.h, x, y)) { hit = ann; break; }
     } else if (ann.bbox) {
       const [bx, by, bw, bh] = ann.bbox;
       if (x >= bx && x <= bx+bw && y >= by && y <= by+bh) { hit = ann; break; }
