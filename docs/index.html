@@ -21,6 +21,9 @@ header .counter{color:#aaa;font-size:13px;white-space:nowrap;margin-left:auto}
 /* Left panel */
 .left-panel{width:200px;background:#252525;border-right:1px solid #444;display:flex;flex-direction:column;flex-shrink:0}
 .left-panel h3{padding:6px 10px;font-size:12px;color:#888;border-bottom:1px solid #333}
+#searchInput{width:100%;padding:5px 10px;background:#2a2a2a;border:none;border-bottom:1px solid #444;color:#fff;font-size:12px;outline:none}
+#searchInput:focus{border-bottom-color:#4a6a8a}
+#searchInput::placeholder{color:#666}
 .image-list{flex:1;overflow-y:auto}
 .img-item{padding:4px 10px;font-size:11px;cursor:pointer;border-bottom:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center}
 .img-item:hover{background:#333}
@@ -92,6 +95,7 @@ footer .spacer{flex:1}
 <div class="main">
   <div class="left-panel">
     <h3>이미지 목록</h3>
+    <input type="text" id="searchInput" placeholder="이미지 이름 검색..." oninput="filterImageList()">
     <div class="image-list" id="imageList"></div>
   </div>
 
@@ -419,13 +423,16 @@ function initDataset() {
 // =================================================================
 // Image list
 // =================================================================
-function renderImageList() {
+function renderImageList(filter) {
   const list = document.getElementById('imageList');
   list.innerHTML = '';
   const memoImageIds = new Set(Object.values(memos).map(m => m.image_id));
+  const query = (filter || '').toLowerCase();
   imageList.forEach((img, i) => {
+    if (query && !img.file_name.toLowerCase().includes(query)) return;
     const el = document.createElement('div');
     el.className = 'img-item' + (i === currentIdx ? ' active' : '');
+    el.dataset.idx = i;
     if (memoImageIds.has(img.id)) el.classList.add('has-memo');
     const cnt = (annByImage[img.id] || []).length;
     const name = img.file_name.length > 24 ? '...' + img.file_name.slice(-24) : img.file_name;
@@ -435,8 +442,15 @@ function renderImageList() {
   });
 }
 
+function filterImageList() {
+  const query = document.getElementById('searchInput').value;
+  renderImageList(query);
+}
+
 function updateActiveItem() {
-  document.querySelectorAll('.img-item').forEach((el, i) => el.classList.toggle('active', i === currentIdx));
+  document.querySelectorAll('.img-item').forEach(el => {
+    el.classList.toggle('active', parseInt(el.dataset.idx) === currentIdx);
+  });
   const active = document.querySelector('.img-item.active');
   if (active) active.scrollIntoView({block: 'nearest'});
 }
