@@ -219,6 +219,49 @@ function generateColor(i, n) {
   return {r:Math.round((r+m)*255), g:Math.round((g+m)*255), b:Math.round((b+m)*255)};
 }
 
+// Vary a base color by shifting hue/saturation for instance distinction
+function varyColor(base, index) {
+  if (index === 0) return base;
+  // Convert RGB to HSL, shift hue, adjust saturation
+  const r = base.r/255, g = base.g/255, b = base.b/255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  let h, s, l = (max+min)/2;
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d/(2-max-min) : d/(max+min);
+    if (max===r) h = ((g-b)/d + (g<b?6:0))/6;
+    else if (max===g) h = ((b-r)/d + 2)/6;
+    else h = ((r-g)/d + 4)/6;
+  }
+  // Shift hue by index * golden angle, vary saturation slightly
+  h = (h + index * 0.137) % 1;
+  s = Math.min(1, Math.max(0.3, s + ((index%3)-1)*0.1));
+  l = Math.min(0.75, Math.max(0.3, l + ((index%2)*0.08 - 0.04)));
+  // HSL to RGB
+  const hue2rgb = (p,q,t) => { if(t<0)t+=1; if(t>1)t-=1; if(t<1/6)return p+(q-p)*6*t; if(t<1/2)return q; if(t<2/3)return p+(q-p)*(2/3-t)*6; return p; };
+  const q = l<0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
+  return {r:Math.round(hue2rgb(p,q,h+1/3)*255), g:Math.round(hue2rgb(p,q,h)*255), b:Math.round(hue2rgb(p,q,h-1/3)*255)};
+}
+
+// Assign unique colors per instance within each image
+function assignInstanceColors(anns) {
+  const colors = {}; // ann_id -> {r,g,b}
+  const byCat = {};
+  anns.forEach(ann => {
+    const cid = ann.category_id;
+    if (!byCat[cid]) byCat[cid] = [];
+    byCat[cid].push(ann);
+  });
+  for (const [cid, catAnns] of Object.entries(byCat)) {
+    const base = catColors[cid] || {r:200,g:200,b:200};
+    catAnns.forEach((ann, i) => {
+      colors[ann.id] = varyColor(base, i);
+    });
+  }
+  return colors;
+}
+
 // =================================================================
 // COCO RLE Decode (faithful port of pycocotools rlelib.c)
 // =================================================================
@@ -573,6 +616,9 @@ function renderCurrent() {
     if (m.image_id === imgInfo.id && m.type !== 'missing') errorIds.add(m.ann_id);
   }
 
+  // Assign per-instance colors
+  const instColors = assignInstanceColors(anns);
+
   // ---- Mask overlay ----
   if (showMask) {
     const overlay = ctx.createImageData(cw, ch);
@@ -580,7 +626,7 @@ function renderCurrent() {
 
     for (const ann of anns) {
       if (ann.category_id === roiCatId) continue;
-      const color = catColors[ann.category_id] || {r:200,g:200,b:200};
+      const color = instColors[ann.id] || catColors[ann.category_id] || {r:200,g:200,b:200};
       const md = decodedMasks[ann.id];
 
       if (md && md.cnts) {
@@ -638,7 +684,7 @@ function renderCurrent() {
   if (showMask) {
     for (const ann of anns) {
       if (ann.category_id === roiCatId) continue;
-      const color = catColors[ann.category_id] || {r:200,g:200,b:200};
+      const color = instColors[ann.id] || catColors[ann.category_id] || {r:200,g:200,b:200};
       const colorStr = `rgb(${color.r},${color.g},${color.b})`;
       ctx.strokeStyle = colorStr;
       ctx.lineWidth = 1;
@@ -672,7 +718,7 @@ function renderCurrent() {
   if (showLabel) {
     for (const ann of anns) {
       if (ann.category_id === roiCatId || !ann.bbox) continue;
-      const color = catColors[ann.category_id] || {r:200,g:200,b:200};
+      const color = instColors[ann.id] || catColors[ann.category_id] || {r:200,g:200,b:200};
       const colorStr = `rgb(${color.r},${color.g},${color.b})`;
       const [bx,by,bw,bh] = ann.bbox;
       const cx = (bx+bw/2)*scale, cy = (by+bh/2)*scale;
